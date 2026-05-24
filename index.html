@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Üzvlük Yoxlama və QR Kod Sistemi</title>
+    <!-- QR kod kitabxanası -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #f4f6f9;
+            --card-bg: #ffffff;
+            --text-color: #333333;
+            --success: #2ec4b6;
+            --danger: #e71d36;
+            --primary: #ff9f1c;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            max-width: 600px;
+            width: 100%;
+            background: var(--card-bg);
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+            text-align: center;
+            box-sizing: border-box;
+            margin-bottom: 20px;
+        }
+        h1 { margin-top: 0; color: #111; font-size: 24px; }
+        .status-box {
+            padding: 20px;
+            border-radius: 12px;
+            margin: 20px 0;
+            font-size: 20px;
+            font-weight: bold;
+            display: none;
+        }
+        .active-member {
+            background-color: rgba(46, 196, 182, 0.15);
+            color: #0f7d73;
+            border: 2px solid var(--success);
+        }
+        .inactive-member {
+            background-color: rgba(231, 29, 54, 0.15);
+            color: #b01024;
+            border: 2px solid var(--danger);
+        }
+        .member-details {
+            text-align: left;
+            margin-top: 15px;
+            font-size: 16px;
+            line-height: 1.6;
+        }
+        .member-details hr { border: 0; border-top: 1px solid #eee; margin: 10px 0; }
+        .admin-section {
+            margin-top: 30px;
+            border-top: 2px dashed #ddd;
+            padding-top: 20px;
+        }
+        .qr-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .qr-card {
+            background: #fff;
+            padding: 10px;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-size: 12px;
+        }
+        .qr-card .qrcode { margin: 10px 0; }
+        .btn-print {
+            background: #111;
+            color: #fff;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-top: 5px;
+            font-size: 11px;
+        }
+        @media print {
+            body * { visibility: hidden; }
+            .qr-grid, .qr-grid * { visibility: visible; }
+            .qr-grid { position: absolute; left: 0; top: 0; }
+            .btn-print { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Yoxlama Paneli (Skan edəndə bura görünəcək) -->
+    <div class="container" id="scannerView">
+        <h1 id="titleText">Üzvlük Yoxlama Sistemi</h1>
+        
+        <div id="statusBox" class="status-box"></div>
+        
+        <div id="memberDetails" class="member-details" style="display: none;">
+            <strong>Ad Soyad:</strong> <span id="mName">-</span><br>
+            <strong>Vəzifə / Status:</strong> <span id="mRole">-</span><br>
+            <hr>
+            <small style="color: #777;">Yoxlanılma tarixi: <span id="mCheckTime">-</span></small>
+        </div>
+        
+        <div id="notFoundBox" class="status-box inactive-member" style="display: none;">
+            MƏLUMAT TAPILMADI / SƏHV BARKOD
+        </div>
+    </div>
+
+    <!-- QR Kod Generator (Kartları çap etmək üçün admin paneli) -->
+    <div class="container admin-section" id="adminView">
+        <h2>QR Kod Generator Paneli</h2>
+        <p style="color: #666; font-size: 14px;">Aşağıdakı siyahıdakı üzvlər üçün avtomatik yaradılmış QR kodlar. Bu kodları akkreditasiya kartlarına vura bilərsiniz.</p>
+        <button onclick="window.print()" style="background: var(--primary); color: white; border:none; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer;">Hamısını Çap Et (Print)</button>
+        
+        <div class="qr-grid" id="qrGrid"></div>
+    </div>
+
+    <script>
+        // ÜZV SİYAHISI (Buranı istədiyiniz kimi redaktə edə bilərsiniz)
+        // status: "aktiv" və ya "deaktiv" ola bilər.
+        const uzvler = [
+            { id: "UZV001", ad: "Əli Cəfərov", vezife: "Media Menecer", status: "aktiv" },
+            { id: "UZV002", ad: "Nəzrin Zülfüqarova", vezife: "İcraçı Direktor", status: "aktiv" },
+            { id: "UZV003", ad: "Məmməd Məmmədov", vezife: "Könüllü", status: "deaktiv" },
+            { id: "UZV004", ad: "Aysel Əliyeva", vezife: "Koordinator", status: "aktiv" }
+        ];
+
+        // Cari URL-dən üzv ID-sini oxumaq (?id=UZV001)
+        const urlParams = new URLSearchParams(window.location.search);
+        const memberId = urlParams.get('id');
+
+        const currentUrlBase = window.location.href.split('?')[0];
+
+        if (memberId) {
+            // Əgər linkdə ID varsa, yoxlama rejimini işə sal
+            document.getElementById('adminView').style.display = 'none';
+            const uzv = uzvler.find(u => u.id === memberId);
+
+            if (uzv) {
+                const statusBox = document.getElementById('statusBox');
+                document.getElementById('memberDetails').style.display = 'block';
+                document.getElementById('mName').innerText = uzv.ad;
+                document.getElementById('mRole').innerText = uzv.vezife;
+                document.getElementById('mCheckTime').innerText = new Date().toLocaleString('az-AZ');
+
+                if (uzv.status === "aktiv") {
+                    statusBox.innerText = "✓ GİRİŞƏ İCRAZƏ VERİLDİ (ÜZVDÜR)";
+                    statusBox.className = "status-box active-member";
+                } else {
+                    statusBox.innerText = "✗ GİRİŞ QADAĞANDIR (DEAKTİV)";
+                    statusBox.className = "status-box inactive-member";
+                }
+                statusBox.style.display = 'block';
+            } else {
+                document.getElementById('notFoundBox').style.display = 'block';
+            }
+        } else {
+            // Əgər ID yoxdursa, QR Kod Generator rejimini göstər
+            document.getElementById('titleText').innerText = "Üzvlük Sistemi Skaner Rejimi Gözlənilir";
+            document.getElementById('statusBox').innerText = "Zəhmət olmasa yoxlamaq üçün QR kodu skan edin.";
+            document.getElementById('statusBox').style.display = 'block';
+            document.getElementById('statusBox').style.background = '#eee';
+            document.getElementById('statusBox').style.color = '#555';
+            document.getElementById('statusBox').style.border = '1px dashed #ccc';
+
+            // QR kodları ekrana basmaq
+            const qrGrid = document.getElementById('qrGrid');
+            uzvler.forEach(u => {
+                const qrCard = document.createElement('div');
+                qrCard.className = 'qr-card';
+                
+                const memberUrl = `${currentUrlBase}?id=${u.id}`;
+                
+                qrCard.innerHTML = `
+                    <strong>${u.ad}</strong>
+                    <div class="qrcode" id="qr_${u.id}"></div>
+                    <span>ID: ${u.id}</span>
+                    <button class="btn-print" onclick="printSingle('qr_${u.id}', '${u.ad}')">Çap et</button>
+                `;
+                qrGrid.appendChild(qrCard);
+
+                // QR kodu generasiya etmək
+                new QRCode(document.getElementById(`qr_${u.id}`), {
+                    text: memberUrl,
+                    width: 120,
+                    height: 120,
+                    colorDark : "#000000",
+                    colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.H
+                });
+            });
+        }
+
+        function printSingle(divId, name) {
+            const qrHtml = document.getElementById(divId).innerHTML;
+            const win = window.open('', '', 'height=500,width=500');
+            win.document.write(`<html><head><title>Çap</title><style>body{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;}</style></head><body>`);
+            win.document.write(`<h3>${name}</h3>`);
+            win.document.write(qrHtml);
+            win.document.write(`</body></html>`);
+            win.document.close();
+            win.print();
+        }
+    </script>
+</body>
+</html>
